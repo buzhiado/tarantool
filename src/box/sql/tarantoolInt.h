@@ -116,8 +116,6 @@ int tarantoolSqlite3EphemeralDelete(BtCursor * pCur);
 int tarantoolSqlite3EphemeralCount(BtCursor * pCur, i64 * pnEntry);
 int tarantoolSqlite3EphemeralDrop(BtCursor * pCur);
 int tarantoolSqlite3EphemeralClearTable(BtCursor * pCur);
-int tarantoolSqlite3EphemeralGetMaxId(BtCursor * pCur, uint32_t fieldno,
-				       uint64_t * max_id);
 
 /**
  * Performs exactly as extract_key + sqlite3VdbeCompareMsgpack,
