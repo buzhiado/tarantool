@@ -1223,9 +1223,6 @@ space_foreach_put_cb(struct space *space, void *udata)
 /* Load database schema from Tarantool. */
 void tarantoolSqlite3LoadSchema(InitData *init)
 {
-	box_iterator_t *it;
-	box_tuple_t *tuple;
-
 	sql_schema_put(
 		init, TARANTOOL_SYS_SCHEMA_NAME,
 		BOX_SCHEMA_ID, 0,
@@ -1294,42 +1291,6 @@ void tarantoolSqlite3LoadSchema(InitData *init)
 		init->rc = SQL_TARANTOOL_ERROR;
 		return;
 	}
-
-	/* Read _trigger */
-	it = box_index_iterator(BOX_TRIGGER_ID, 0, ITER_GE,
-				nil_key, nil_key + sizeof(nil_key));
-
-	if (it == NULL) {
-		init->rc = SQL_TARANTOOL_ITERATOR_FAIL;
-		return;
-	}
-
-	while (box_iterator_next(it, &tuple) == 0 && tuple != NULL) {
-		const char *field, *ptr;
-		char *name, *sql;
-		unsigned len;
-		assert(tuple_field_count(tuple) == 2);
-
-		field = tuple_field(tuple, 0);
-		assert (field != NULL);
-		ptr = mp_decode_str(&field, &len);
-		name = strndup(ptr, len);
-
-		field = tuple_field(tuple, 1);
-		assert (field != NULL);
-		mp_decode_array(&field);
-		ptr = mp_decode_str(&field, &len);
-		assert (strncmp(ptr, "sql", 3) == 0);
-
-		ptr = mp_decode_str(&field, &len);
-		sql = strndup(ptr, len);
-
-		sql_schema_put(init, name, 0, 0, sql);
-
-		free(name);
-		free(sql);
-	}
-	box_iterator_free(it);
 }
 
 /*********************************************************************
@@ -1735,6 +1696,15 @@ space_column_default_expr(uint32_t space_id, uint32_t fieldno)
 	assert(space->def->field_count > fieldno);
 
 	return space->def->fields[fieldno].default_value_expr;
+}
+
+struct Trigger *
+space_trigger_list(uint32_t space_id)
+{
+	struct space *space = space_cache_find(space_id);
+	assert(space != NULL);
+	assert(space->def != NULL);
+	return space->sql_triggers;
 }
 
 struct space_def *

@@ -39,6 +39,7 @@
 #include <stdlib.h>
 #include <unicode/utf8.h>
 #include <unicode/uchar.h>
+#include "box/schema.h"
 
 #include "say.h"
 #include "sqliteInt.h"
@@ -123,6 +124,7 @@ static const char sql_ascii_class[] = {
  * the #include below.
  */
 #include "keywordhash.h"
+#include "tarantoolInt.h"
 
 #define maybe_utf8(c) ((sqlite3CtypeMap[c] & 0x40) != 0)
 
@@ -534,7 +536,12 @@ sqlite3RunParser(Parse * pParse, const char *zSql, char **pzErrMsg)
 
 	if (pParse->pWithToFree)
 		sqlite3WithDelete(db, pParse->pWithToFree);
-	sql_trigger_delete(db, pParse->pNewTrigger);
+	/*
+	 * Trigger is exported with pNewTrigger field when
+	 * parse_only flag is set.
+	 */
+	if (!pParse->parse_only)
+		sql_trigger_delete(db, pParse->pNewTrigger);
 	sqlite3DbFree(db, pParse->pVList);
 	while (pParse->pZombieTab) {
 		Table *p = pParse->pZombieTab;
@@ -574,4 +581,23 @@ sql_expr_compile(sqlite3 *db, const char *expr, int expr_len)
 cleanup:
 	sql_parser_destroy(&parser);
 	return expression;
+}
+
+struct Trigger *
+sql_trigger_compile(struct sqlite3 *db, const char *sql)
+{
+	struct Parse parser;
+	sql_parser_create(&parser, db);
+	parser.parse_only = true;
+	char *sql_error;
+	struct Trigger *trigger = NULL;
+	if (sqlite3RunParser(&parser, sql, &sql_error) != SQLITE_OK) {
+		char *error = tt_static_buf();
+		snprintf(error, TT_STATIC_BUF_LEN, "%s", sql_error);
+		diag_set(ClientError, ER_SQL, sql_error);
+	} else {
+		trigger = parser.pNewTrigger;
+	}
+	sql_parser_destroy(&parser);
+	return trigger;
 }

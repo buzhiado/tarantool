@@ -551,6 +551,8 @@ space_swap_triggers(struct space *new_space, struct space *old_space)
 	rlist_swap(&new_space->before_replace, &old_space->before_replace);
 	rlist_swap(&new_space->on_replace, &old_space->on_replace);
 	rlist_swap(&new_space->on_stmt_begin, &old_space->on_stmt_begin);
+	/** Copy SQL Triggers pointer. */
+	new_space->sql_triggers = old_space->sql_triggers;
 }
 
 /**
@@ -3091,6 +3093,55 @@ lock_before_dd(struct trigger *trigger, void *event)
 	latch_lock(&schema_lock);
 }
 
+static void
+triggers_task_rollback(struct trigger *trigger, void *event)
+{
+	struct txn_stmt *stmt = txn_last_stmt((struct txn*) event);
+	struct Trigger *old_trigger = (struct Trigger *)trigger->data;
+	struct Trigger *new_trigger;
+
+	if (stmt->old_tuple != NULL && stmt->new_tuple == NULL) {
+		/* DELETE trigger. */
+		if (sql_trigger_replace(sql_get(),
+					sql_trigger_name(old_trigger),
+					old_trigger, &new_trigger) != 0)
+			panic("Out of memory on insertion into trigger hash");
+		assert(new_trigger == NULL);
+	}  else if (stmt->new_tuple != NULL && stmt->old_tuple == NULL) {
+		/* INSERT trigger. */
+		int rc =
+			sql_trigger_replace(sql_get(),
+					    sql_trigger_name(old_trigger),
+					    NULL, &new_trigger);
+		(void)rc;
+		assert(rc == 0);
+		assert(new_trigger == old_trigger);
+		sql_trigger_delete(sql_get(), new_trigger);
+	} else {
+		/* REPLACE trigger. */
+		if (sql_trigger_replace(sql_get(),
+					sql_trigger_name(old_trigger),
+					old_trigger, &new_trigger) != 0)
+			panic("Out of memory on insertion into trigger hash");
+		assert(old_trigger != new_trigger);
+
+		sql_trigger_delete(sql_get(), new_trigger);
+	}
+}
+
+
+static void
+triggers_task_commit(struct trigger *trigger, void *event)
+{
+	struct txn_stmt *stmt = txn_last_stmt((struct txn*) event);
+	struct Trigger *old_trigger = (struct Trigger *)trigger->data;
+
+	if (stmt->old_tuple != NULL) {
+		/* DELETE, REPLACE trigger. */
+		sql_trigger_delete(sql_get(), old_trigger);
+	}
+}
+
 /**
  * A trigger invoked on replace in a space containing
  * SQL triggers.
@@ -3100,6 +3151,95 @@ on_replace_dd_trigger(struct trigger * /* trigger */, void *event)
 {
 	struct txn *txn = (struct txn *) event;
 	txn_check_singlestatement_xc(txn, "Space _trigger");
+	struct txn_stmt *stmt = txn_current_stmt(txn);
+	struct tuple *old_tuple = stmt->old_tuple;
+	struct tuple *new_tuple = stmt->new_tuple;
+
+	struct trigger *on_rollback =
+		txn_alter_trigger_new(triggers_task_rollback, NULL);
+	struct trigger *on_commit =
+		txn_alter_trigger_new(triggers_task_commit, NULL);
+
+	char *trigger_name = NULL;
+	struct Trigger *new_trigger = NULL;
+	if (old_tuple != NULL) {
+		/* DROP, REPLACE trigger. */
+		uint32_t trigger_name_len;
+		const char *trigger_name_src =
+			tuple_field_str_xc(old_tuple, 0, &trigger_name_len);
+		trigger_name =
+			(char *)region_alloc_xc(&fiber()->gc,
+						trigger_name_len + 1);
+		memcpy(trigger_name, trigger_name_src, trigger_name_len);
+		trigger_name[trigger_name_len] = 0;
+	}
+	if (new_tuple != NULL) {
+		/* INSERT, REPLACE trigger. */
+		uint32_t trigger_name_len;
+		const char *trigger_name_src =
+			tuple_field_str_xc(new_tuple, 0, &trigger_name_len);
+
+		const char *space_opts =
+			tuple_field_with_type_xc(new_tuple, 1, MP_MAP);
+		struct space_opts opts;
+		struct region *region = &fiber()->gc;
+		space_opts_decode(&opts, space_opts, region);
+		new_trigger = sql_trigger_compile(sql_get(), opts.sql);
+		if (new_trigger == NULL)
+			diag_raise();
+
+		if (strncmp(trigger_name_src, sql_trigger_name(new_trigger),
+			    trigger_name_len) != 0) {
+			sql_trigger_delete(sql_get(), new_trigger);
+			tnt_raise(ClientError, ER_SQL,
+				  "tuple trigger name does not match extracted "
+				  "from SQL");
+		}
+		trigger_name = sql_trigger_name(new_trigger);
+	}
+
+	if (old_tuple != NULL && new_tuple == NULL) {
+		/* DELETE trigger. */
+		struct Trigger *old_trigger;
+		int rc =
+			sql_trigger_replace(sql_get(), trigger_name, NULL,
+					    &old_trigger);
+		(void)rc;
+		assert(rc == 0);
+		assert(old_trigger != NULL);
+
+		on_commit->data = old_trigger;
+		on_rollback->data = old_trigger;
+	} else if (new_tuple != NULL && old_tuple == NULL) {
+		/* INSERT trigger. */
+		struct Trigger *old_trigger;
+		if (sql_trigger_replace(sql_get(), trigger_name, new_trigger,
+					&old_trigger) != 0) {
+			sql_trigger_delete(sql_get(), new_trigger);
+			diag_raise();
+		}
+		assert(old_trigger == NULL);
+
+		on_commit->data = NULL;
+		on_rollback->data = new_trigger;
+	} else {
+		/* REPLACE trigger. */
+		struct Trigger *old_trigger;
+		if (sql_trigger_replace(sql_get(), trigger_name, new_trigger,
+					&old_trigger) != 0) {
+			sql_trigger_delete(sql_get(), new_trigger);
+			diag_raise();
+		}
+		assert(old_trigger != NULL);
+
+		on_commit->data = old_trigger;
+		on_rollback->data = old_trigger;
+	}
+
+	txn_on_rollback(txn, on_rollback);
+	txn_on_commit(txn, on_commit);
+
+
 }
 
 struct trigger alter_space_on_replace_space = {
