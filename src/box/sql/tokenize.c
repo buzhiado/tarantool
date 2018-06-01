@@ -42,6 +42,7 @@
 
 #include "say.h"
 #include "sqliteInt.h"
+#include "tarantoolInt.h"
 
 /* Character classes for tokenizing
  *
@@ -510,8 +511,13 @@ sqlite3RunParser(Parse * pParse, const char *zSql, char **pzErrMsg)
 	}
 	if (pParse->rc != SQLITE_OK && pParse->rc != SQLITE_DONE
 	    && pParse->zErrMsg == 0) {
-		pParse->zErrMsg =
-		    sqlite3MPrintf(db, "%s", sqlite3ErrStr(pParse->rc));
+		const char *error;
+		if (is_tarantool_error(pParse->rc) &&
+		    tarantoolErrorMessage() != NULL)
+			error = tarantoolErrorMessage();
+		else
+			error = sqlite3ErrStr(pParse->rc);
+		pParse->zErrMsg = sqlite3MPrintf(db, "%s", error);
 	}
 	assert(pzErrMsg != 0);
 	if (pParse->zErrMsg) {
@@ -539,9 +545,8 @@ sqlite3RunParser(Parse * pParse, const char *zSql, char **pzErrMsg)
 	return nErr;
 }
 
-int
-sql_expr_compile(sqlite3 *db, const char *expr, int expr_len,
-		 struct Expr **result)
+struct Expr *
+sql_expr_compile(sqlite3 *db, const char *expr, int expr_len)
 {
 	const char *outer = "SELECT ";
 	int len = strlen(outer) + expr_len;
@@ -550,19 +555,23 @@ sql_expr_compile(sqlite3 *db, const char *expr, int expr_len,
 	sql_parser_create(&parser, db);
 	parser.parse_only = true;
 
+	struct Expr *expression = NULL;
 	char *stmt = (char *)region_alloc(&parser.region, len + 1);
 	if (stmt == NULL) {
 		diag_set(OutOfMemory, len + 1, "region_alloc", "stmt");
-		return -1;
+		goto cleanup;
 	}
 	sprintf(stmt, "%s%.*s", outer, expr_len, expr);
 
-	char *unused;
-	if (sqlite3RunParser(&parser, stmt, &unused) != SQLITE_OK) {
-		diag_set(ClientError, ER_SQL_EXECUTE, expr);
-		return -1;
+	char *sql_error;
+	if (sqlite3RunParser(&parser, stmt, &sql_error) != SQLITE_OK) {
+		char *error = tt_static_buf();
+		snprintf(error, TT_STATIC_BUF_LEN, "%s", sql_error);
+		diag_set(ClientError, ER_SQL, sql_error);
+		goto cleanup;
 	}
-	*result = parser.parsed_expr;
+	expression = parser.parsed_expr;
+cleanup:
 	sql_parser_destroy(&parser);
-	return 0;
+	return expression;
 }
