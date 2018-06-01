@@ -66,6 +66,7 @@ struct Expr;
 struct Parse;
 struct Select;
 struct Table;
+struct Trigger;
 
 /**
  * Perform parsing of provided expression. This is done by
@@ -81,6 +82,14 @@ struct Table;
  */
 struct Expr *
 sql_expr_compile(struct sqlite3 *db, const char *expr, int expr_len);
+
+/**
+ * Free AST pointed by trigger.
+ * @param db SQL handle.
+ * @param trigger AST object.
+ */
+void
+sql_trigger_delete(struct sqlite3 *db, struct Trigger *trigger);
 
 /**
  * Store duplicate of a parsed expression into @a parser.
