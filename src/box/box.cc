@@ -1858,6 +1858,14 @@ box_cfg_xc(void)
 		auto guard = make_scoped_guard([=]{ recovery_delete(recovery); });
 
 		/*
+		 * Initialize the replica set vclock from recovery.
+		 * The local WAL may contain rows from remote masters,
+		 * so we must reflect this in replicaset vclock to
+		 * not attempt to apply these rows twice.
+		 */
+		recovery_end_vclock(recovery, &replicaset.vclock);
+
+		/*
 		 * recovery->vclock is needed by Vinyl to filter
 		 * WAL rows that were dumped before restart.
 		 *
@@ -1909,6 +1917,11 @@ box_cfg_xc(void)
 			recovery_stop_local(recovery);
 			recover_remaining_wals(recovery, &wal_stream.base,
 					       NULL, true);
+			/*
+			 * Advance replica set vclock to reflect records
+			 * applied in hot standby mode.
+			 */
+			vclock_copy(&replicaset.vclock, &recovery->vclock);
 			box_bind();
 		}
 		recovery_finalize(recovery);
@@ -1924,13 +1937,6 @@ box_cfg_xc(void)
 
 		/* Clear the pointer to journal before it goes out of scope */
 		journal_set(NULL);
-		/*
-		 * Initialize the replica set vclock from recovery.
-		 * The local WAL may contain rows from remote masters,
-		 * so we must reflect this in replicaset vclock to
-		 * not attempt to apply these rows twice.
-		 */
-		vclock_copy(&replicaset.vclock, &recovery->vclock);
 
 		/** Begin listening only when the local recovery is complete. */
 		box_listen();
