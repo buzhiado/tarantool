@@ -1453,11 +1453,18 @@ sqlite3_errmsg(sqlite3 * db)
 	if (db->mallocFailed) {
 		z = sqlite3ErrStr(SQLITE_NOMEM_BKPT);
 	} else {
-		testcase(db->pErr == 0);
-		z = (char *)sqlite3_value_text(db->pErr);
-		assert(!db->mallocFailed);
-		if (z == 0) {
-			z = sqlite3ErrStr(db->errCode);
+		if (db->errCode != SQL_TARANTOOL_ERROR) {
+			testcase(db->pErr == 0);
+			z = (char *) sqlite3_value_text(db->pErr);
+			assert(!db->mallocFailed);
+			if (z == 0) {
+				z = sqlite3ErrStr(db->errCode);
+			}
+		} else {
+			struct diag *diag = diag_get();
+			assert(diag != NULL);
+			struct error *error = diag_last_error(diag);
+			z = error->errmsg;
 		}
 	}
 	return z;

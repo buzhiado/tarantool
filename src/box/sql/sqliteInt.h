@@ -3559,6 +3559,26 @@ void sqlite3EndTable(Parse *, Token *, Token *, Select *);
 int
 emit_open_cursor(Parse *, int, int);
 
+/**
+ * Generate VDBE code to halt execution with correct error if
+ * the object with specified name is already present in
+ * specified space.
+ *
+ * @param parser Parsing context.
+ * @param space_id Space to lookup identifier.
+ * @param index_id Index identifier containing string primary key.
+ * @param name Of object to test existency.
+ * @param tarantool_error_code Tarantool error to raise on object exists.
+ * @param no_error Do not raise error flag.
+ *
+ * @retval -1 on memory allocation error.
+ * @retval 0 on success.
+ */
+int
+abort_execution_on_exists(Parse *parser, int space_id, int index_id,
+			  const char *name, int tarantool_error_code,
+			  bool no_error);
+
 int sqlite3ParseUri(const char *, const char *, unsigned int *,
 		    sqlite3_vfs **, char **, char **);
 

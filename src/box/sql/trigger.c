@@ -122,17 +122,6 @@ sqlite3BeginTrigger(Parse * pParse,	/* The parse context of the CREATE TRIGGER s
 	if (sqlite3CheckIdentifierName(pParse, zName) != SQLITE_OK)
 		goto trigger_cleanup;
 
-	if (!pParse->parse_only &&
-	    sqlite3HashFind(&db->pSchema->trigHash, zName) != NULL) {
-		if (!noErr) {
-			diag_set(ClientError, ER_TRIGGER_EXISTS, zName);
-			pParse->rc = SQL_TARANTOOL_ERROR;
-		} else {
-			assert(!db->init.busy);
-		}
-		goto trigger_cleanup;
-	}
-
 	const char *table_name = pTableName->a[0].zName;
 	uint32_t space_id;
 	if (schema_find_id(BOX_SPACE_ID, 2, table_name, strlen(table_name),
@@ -175,6 +164,12 @@ sqlite3BeginTrigger(Parse * pParse,	/* The parse context of the CREATE TRIGGER s
 			 "cannot create INSTEAD OF trigger on table: %s",
 			 table_name);
 		diag_set(ClientError, ER_SQL, error);
+		pParse->rc = SQL_TARANTOOL_ERROR;
+		goto trigger_cleanup;
+	}
+
+	if (abort_execution_on_exists(pParse, BOX_TRIGGER_ID, 0, zName,
+				      ER_TRIGGER_EXISTS, (noErr != 0)) != 0) {
 		pParse->rc = SQL_TARANTOOL_ERROR;
 		goto trigger_cleanup;
 	}

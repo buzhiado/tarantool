@@ -1005,9 +1005,10 @@ case OP_Halt: {
 	p->rc = pOp->p1;
 	p->errorAction = (u8)pOp->p2;
 	p->pc = pcx;
-	assert(pOp->p5<=4);
 	if (p->rc) {
-		if (pOp->p5) {
+		if (pOp->p5 != 0 && p->rc == SQL_TARANTOOL_ERROR) {
+			diag_set(ClientError, pOp->p5, pOp->p4.z);
+		} else if (pOp->p5 != 0) {
 			static const char * const azType[] = { "NOT NULL", "UNIQUE", "CHECK",
 							       "FOREIGN KEY" };
 			testcase( pOp->p5==1);
@@ -1029,7 +1030,10 @@ case OP_Halt: {
 		p->rc = SQLITE_BUSY;
 	} else {
 		assert(rc==SQLITE_OK || (p->rc&0xff)==SQLITE_CONSTRAINT);
-		rc = p->rc ? SQLITE_ERROR : SQLITE_DONE;
+		if (p->rc != SQL_TARANTOOL_ERROR)
+			rc = (p->rc != SQLITE_OK) ? SQLITE_ERROR : SQLITE_DONE;
+		else
+			rc = SQL_TARANTOOL_ERROR;
 	}
 	goto vdbe_return;
 }

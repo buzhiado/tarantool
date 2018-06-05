@@ -565,7 +565,7 @@ sqlite3StartTable(Parse *pParse, Token *pName, int noErr)
 	 */
 	if (!pParse->nested) {
 		if ((v = sqlite3GetVdbe(pParse)) == NULL)
-			goto begin_table_error;
+			goto cleanup;
 		sqlite3VdbeCountChanges(v);
 	}
 
@@ -575,24 +575,11 @@ sqlite3StartTable(Parse *pParse, Token *pName, int noErr)
 	if (zName == 0)
 		return;
 	if (sqlite3CheckIdentifierName(pParse, zName) != SQLITE_OK)
-		goto begin_table_error;
-
-	assert(db->pSchema != NULL);
-	pTable = sqlite3HashFind(&db->pSchema->tblHash, zName);
-	if (pTable != NULL) {
-		if (!noErr) {
-			sqlite3ErrorMsg(pParse,
-					"table %s already exists",
-					zName);
-		} else {
-			assert(!db->init.busy || CORRUPT_DB);
-		}
-		goto begin_table_error;
-	}
+		goto cleanup;
 
 	pTable = sql_table_new(pParse, zName);
 	if (pTable == NULL)
-		goto begin_table_error;
+		goto cleanup;
 
 	assert(pParse->pNewTable == 0);
 	pParse->pNewTable = pTable;
@@ -605,14 +592,17 @@ sqlite3StartTable(Parse *pParse, Token *pName, int noErr)
 	 * indices.  Hence, the record number for the table must be allocated
 	 * now.
 	 */
-	if (!db->init.busy && (v = sqlite3GetVdbe(pParse)) != 0)
+	if (!db->init.busy && (v = sqlite3GetVdbe(pParse)) != 0) {
+		if (abort_execution_on_exists(pParse, BOX_SPACE_ID, 2, zName,
+					      ER_SPACE_EXISTS,
+					      (noErr != 0)) != 0) {
+			pParse->rc = SQL_TARANTOOL_ERROR;
+			goto cleanup;
+		}
 		sql_set_multi_write(pParse, true);
+	}
 
-	/* Normal (non-error) return. */
-	return;
-
-	/* If an error occurs, we jump here */
- begin_table_error:
+ cleanup:
 	sqlite3DbFree(db, zName);
 	return;
 }
@@ -4170,4 +4160,45 @@ sqlite3WithDelete(sqlite3 * db, With * pWith)
 		sqlite3DbFree(db, pWith);
 	}
 }
+
+int
+abort_execution_on_exists(Parse *parser, int space_id, int index_id,
+			  const char *name, int tarantool_error_code,
+			  bool no_error)
+{
+	Vdbe *v = sqlite3GetVdbe(parser);
+	assert(v != NULL);
+
+	sqlite3 *db = parser->db;
+	name = sqlite3DbStrDup(db, name);
+	if (name == NULL) {
+		diag_set(OutOfMemory, strlen(name) + 1, "sqlite3DbStrDup",
+			 "name");
+		return -1;
+	}
+
+	int cursor = parser->nTab++;
+	int entity_id =
+		SQLITE_PAGENO_FROM_SPACEID_AND_INDEXID(space_id, index_id);
+	emit_open_cursor(parser, cursor, entity_id);
+
+	int name_reg = parser->nMem++;
+	int label =
+		sqlite3VdbeAddOp4(v, OP_String8, 0, name_reg, 0, name, P4_DYNAMIC);
+
+	sqlite3VdbeAddOp4Int(v, OP_NoConflict, cursor, label + 3,
+			     name_reg, 1);
+	if (no_error) {
+		sqlite3VdbeAddOp0(v, OP_Halt);
+	} else {
+		sqlite3VdbeAddOp4(v, OP_Halt, SQL_TARANTOOL_ERROR,
+				  ON_CONFLICT_ACTION_FAIL, 0,
+				  name, P4_STATIC);
+		sqlite3VdbeChangeP5(v, tarantool_error_code);
+	}
+
+	sqlite3VdbeAddOp1(v, OP_Close, cursor);
+	return 0;
+}
+
 #endif				/* !defined(SQLITE_OMIT_CTE) */
