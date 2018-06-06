@@ -625,6 +625,21 @@ error:
 		  "failed to connect to one or more replicas");
 }
 
+bool
+replicaset_needs_rejoin(struct replica **master)
+{
+	replicaset_foreach(replica) {
+		if (replica->applier != NULL &&
+		    vclock_compare(&replica->applier->gc_vclock,
+				   &replicaset.vclock) > 0) {
+			*master = replica;
+			return true;
+		}
+	}
+	*master = NULL;
+	return false;
+}
+
 void
 replicaset_follow(void)
 {

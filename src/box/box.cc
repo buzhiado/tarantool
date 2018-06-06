@@ -1777,6 +1777,9 @@ bootstrap(const struct tt_uuid *instance_uuid,
 /**
  * Recover the instance from the local directory.
  * Enter hot standby if the directory is locked.
+ * Invoke rebootstrap if the instance fell too much
+ * behind its peers in the replica set and needs
+ * to be rebootstrapped.
  */
 static void
 local_recovery(const struct tt_uuid *instance_uuid,
@@ -1812,6 +1815,12 @@ local_recovery(const struct tt_uuid *instance_uuid,
 	if (wal_dir_lock >= 0) {
 		box_listen();
 		box_sync_replication(replication_connect_timeout, false);
+
+		struct replica *master;
+		if (replicaset_needs_rejoin(&master)) {
+			say_info("replica is too old, initiating rejoin");
+			return bootstrap_from_master(master);
+		}
 	}
 
 	/*
