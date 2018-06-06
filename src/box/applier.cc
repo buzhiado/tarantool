@@ -228,6 +228,21 @@ applier_connect(struct applier *applier)
 					    &applier->remote_is_ro);
 	}
 
+	/**
+	 * Tarantool >= 1.10.1: send an IPROTO_GET_GC_VCLOCK message
+	 * to find out the oldest vclock available at the remove end.
+	 * Needed to check if the replica has to be rebootstrapped.
+	 */
+	if (applier->version_id >= version_id(1, 10, 1)) {
+		xrow_encode_get_gc_vclock(&row);
+		coio_write_xrow(coio, &row);
+		coio_read_xrow(coio, ibuf, &row);
+		if (row.type != IPROTO_OK)
+			xrow_decode_error_xc(&row);
+		vclock_create(&applier->gc_vclock);
+		xrow_decode_vclock_xc(&row, &applier->gc_vclock);
+	}
+
 	applier_set_state(applier, APPLIER_CONNECTED);
 
 	/* Detect connection to itself */

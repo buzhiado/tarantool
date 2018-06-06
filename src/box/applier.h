@@ -96,6 +96,8 @@ struct applier {
 	uint32_t version_id;
 	/** Remote vclock at time of connect. */
 	struct vclock vclock;
+	/** Oldest vclock available at remote at time of connect. */
+	struct vclock gc_vclock;
 	/** Remote peer mode, true if read-only, default: false */
 	bool remote_is_ro;
 	/** Remote address */

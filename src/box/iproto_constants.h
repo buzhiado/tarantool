@@ -156,6 +156,8 @@ enum iproto_type {
 	IPROTO_SUBSCRIBE = 66,
 	/** Vote request command for master election */
 	IPROTO_REQUEST_VOTE = 67,
+	/** Command to inquire garbage collection state */
+	IPROTO_GET_GC_VCLOCK = 68,
 
 	/** Vinyl run info stored in .index file */
 	VY_INDEX_RUN_INFO = 100,

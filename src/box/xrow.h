@@ -230,6 +230,13 @@ void
 xrow_encode_request_vote(struct xrow_header *row);
 
 /**
+ * Encode a vote request for gc state inquiry.
+ * @param row[out] Row to encode into.
+ */
+void
+xrow_encode_get_gc_vclock(struct xrow_header *row);
+
+/**
  * Encode SUBSCRIBE command.
  * @param[out] Row.
  * @param replicaset_uuid Replica set uuid.
@@ -385,6 +392,21 @@ iproto_reply_select(struct obuf *buf, struct obuf_svp *svp, uint64_t sync,
  */
 int
 iproto_reply_ok(struct obuf *out, uint64_t sync, uint32_t schema_version);
+
+/**
+ * Encode iproto header with IPROTO_OK response code
+ * and vclock in the body.
+ * @param out Encode to.
+ * @param sync Request sync.
+ * @param schema_version.
+ * @param vclock.
+ *
+ * @retval  0 Success.
+ * @retval -1 Memory error.
+ */
+int
+iproto_reply_vclock(struct obuf *out, uint64_t sync, uint32_t schema_version,
+		    const struct vclock *vclock);
 
 /**
  * Encode iproto header with IPROTO_OK response code
@@ -655,6 +677,15 @@ static inline void
 iproto_reply_ok_xc(struct obuf *out, uint64_t sync, uint32_t schema_version)
 {
 	if (iproto_reply_ok(out, sync, schema_version) != 0)
+		diag_raise();
+}
+
+/** @copydoc iproto_reply_vclock. */
+static inline void
+iproto_reply_vclock_xc(struct obuf *out, uint64_t sync, uint32_t schema_version,
+		       const struct vclock *vclock)
+{
+	if (iproto_reply_vclock(out, sync, schema_version, vclock) != 0)
 		diag_raise();
 }
 

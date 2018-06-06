@@ -1147,6 +1147,7 @@ iproto_msg_decode(struct iproto_msg *msg, const char **pos, const char *reqend,
 		*stop_input = true;
 		break;
 	case IPROTO_REQUEST_VOTE:
+	case IPROTO_GET_GC_VCLOCK:
 		cmsg_init(&msg->base, misc_route);
 		break;
 	case IPROTO_AUTH:
@@ -1509,6 +1510,7 @@ tx_process_misc(struct cmsg *m)
 	struct iproto_msg *msg = tx_accept_msg(m);
 	struct iproto_connection *con = msg->connection;
 	struct obuf *out = con->tx.p_obuf;
+	struct vclock vclock;
 	if (tx_check_schema(msg->header.schema_version))
 		goto error;
 
@@ -1528,6 +1530,11 @@ tx_process_misc(struct cmsg *m)
 						     ::schema_version,
 						     &replicaset.vclock,
 						     cfg_geti("read_only"));
+			break;
+		case IPROTO_GET_GC_VCLOCK:
+			box_get_gc_vclock(&vclock);
+			iproto_reply_vclock_xc(out, msg->header.sync,
+					       ::schema_version, &vclock);
 			break;
 		default:
 			unreachable();

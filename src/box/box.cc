@@ -1540,6 +1540,18 @@ box_process_subscribe(struct ev_io *io, struct xrow_header *header)
 			replica_version_id);
 }
 
+void
+box_get_gc_vclock(struct vclock *vclock)
+{
+	struct checkpoint_iterator it;
+	checkpoint_iterator_init(&it);
+	const struct vclock *oldest = checkpoint_iterator_next(&it);
+	if (oldest != NULL)
+		vclock_copy(vclock, oldest);
+	else
+		vclock_create(vclock);
+}
+
 /** Insert a new cluster into _schema */
 static void
 box_set_replicaset_uuid(const struct tt_uuid *replicaset_uuid)
