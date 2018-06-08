@@ -176,7 +176,7 @@ struct vy_log {
 static struct vy_log vy_log;
 
 static struct vy_recovery *
-vy_recovery_new_locked(int64_t signature, bool only_checkpoint);
+vy_recovery_new_locked(int64_t signature, int flags);
 
 static int
 vy_recovery_process_record(struct vy_recovery *recovery,
@@ -898,7 +898,7 @@ vy_log_begin_recovery(const struct vclock *vclock)
 	}
 
 	struct vy_recovery *recovery;
-	recovery = vy_recovery_new(vclock_sum(&vy_log.last_checkpoint), false);
+	recovery = vy_recovery_new(vclock_sum(&vy_log.last_checkpoint), 0);
 	if (recovery == NULL)
 		return NULL;
 
@@ -980,7 +980,7 @@ vy_log_rotate(const struct vclock *vclock)
 	latch_lock(&vy_log.latch);
 
 	struct vy_recovery *recovery;
-	recovery = vy_recovery_new_locked(prev_signature, false);
+	recovery = vy_recovery_new_locked(prev_signature, 0);
 	if (recovery == NULL)
 		goto fail;
 
@@ -2007,7 +2007,7 @@ static ssize_t
 vy_recovery_new_f(va_list ap)
 {
 	int64_t signature = va_arg(ap, int64_t);
-	bool only_checkpoint = va_arg(ap, int);
+	int flags = va_arg(ap, int);
 	struct vy_recovery **p_recovery = va_arg(ap, struct vy_recovery **);
 
 	say_verbose("loading vylog %lld", (long long)signature);
@@ -2064,7 +2064,7 @@ vy_recovery_new_f(va_list ap)
 		say_verbose("load vylog record: %s",
 			    vy_log_record_str(&record));
 		if (record.type == VY_LOG_SNAPSHOT) {
-			if (only_checkpoint)
+			if ((flags & VY_RECOVERY_LOAD_CHECKPOINT) != 0)
 				break;
 			continue;
 		}
@@ -2099,7 +2099,7 @@ fail:
  * Must be called with the log latch held.
  */
 static struct vy_recovery *
-vy_recovery_new_locked(int64_t signature, bool only_checkpoint)
+vy_recovery_new_locked(int64_t signature, int flags)
 {
 	int rc;
 	struct vy_recovery *recovery;
@@ -2117,8 +2117,7 @@ vy_recovery_new_locked(int64_t signature, bool only_checkpoint)
 	}
 
 	/* Load the log from coio so as not to stall tx thread. */
-	rc = coio_call(vy_recovery_new_f, signature,
-		       (int)only_checkpoint, &recovery);
+	rc = coio_call(vy_recovery_new_f, signature, flags, &recovery);
 	if (rc != 0) {
 		diag_log();
 		say_error("failed to load `%s'", vy_log_filename(signature));
@@ -2128,12 +2127,12 @@ vy_recovery_new_locked(int64_t signature, bool only_checkpoint)
 }
 
 struct vy_recovery *
-vy_recovery_new(int64_t signature, bool only_checkpoint)
+vy_recovery_new(int64_t signature, int flags)
 {
 	/* Lock out concurrent writers while we are loading the log. */
 	latch_lock(&vy_log.latch);
 	struct vy_recovery *recovery;
-	recovery = vy_recovery_new_locked(signature, only_checkpoint);
+	recovery = vy_recovery_new_locked(signature, flags);
 	latch_unlock(&vy_log.latch);
 	return recovery;
 }
