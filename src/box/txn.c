@@ -71,9 +71,9 @@ txn_add_redo(struct txn_stmt *stmt, struct request *request)
 	return 0;
 }
 
-/** Initialize a new stmt object within txn. */
+/** Allocate a new txn statement. */
 static struct txn_stmt *
-txn_stmt_new(struct txn *txn)
+txn_stmt_new(void)
 {
 	struct txn_stmt *stmt;
 	stmt = region_alloc_object(&fiber()->gc, struct txn_stmt);
@@ -89,12 +89,6 @@ txn_stmt_new(struct txn *txn)
 	stmt->new_tuple = NULL;
 	stmt->engine_savepoint = NULL;
 	stmt->row = NULL;
-
-	/* Set the savepoint for statement rollback. */
-	txn->sub_stmt_begin[txn->in_sub_stmt] = stailq_last(&txn->stmts);
-	txn->in_sub_stmt++;
-
-	stailq_add_tail_entry(&txn->stmts, stmt, next);
 	return stmt;
 }
 
@@ -106,13 +100,15 @@ txn_rollback_to_svp(struct txn *txn, struct stailq_entry *svp)
 	stailq_cut_tail(&txn->stmts, svp, &rollback);
 	stailq_reverse(&rollback);
 	stailq_foreach_entry(stmt, &rollback, next) {
-		engine_rollback_statement(txn->engine, txn, stmt);
+		if (stmt->space != NULL) {
+			engine_rollback_statement(txn->engine, txn, stmt);
+			stmt->space = NULL;
+		}
 		if (stmt->row != NULL) {
 			assert(txn->n_rows > 0);
 			txn->n_rows--;
 			stmt->row = NULL;
 		}
-		stmt->space = NULL;
 	}
 }
 
@@ -145,7 +141,6 @@ int
 txn_begin_in_engine(struct engine *engine, struct txn *txn)
 {
 	if (txn->engine == NULL) {
-		assert(stailq_empty(&txn->stmts));
 		txn->engine = engine;
 		return engine_begin(engine, txn);
 	} else if (txn->engine != engine) {
@@ -179,10 +174,16 @@ txn_begin_stmt(struct space *space)
 	if (txn_begin_in_engine(engine, txn) != 0)
 		goto fail;
 
-	struct txn_stmt *stmt = txn_stmt_new(txn);
+	struct txn_stmt *stmt = txn_stmt_new();
 	if (stmt == NULL)
 		goto fail;
 	stmt->space = space;
+
+	/* Set the savepoint for statement rollback. */
+	txn->sub_stmt_begin[txn->in_sub_stmt] = stailq_last(&txn->stmts);
+	txn->in_sub_stmt++;
+
+	stailq_add_tail_entry(&txn->stmts, stmt, next);
 
 	if (engine_begin_statement(engine, txn) != 0) {
 		txn_rollback_stmt();
@@ -238,6 +239,35 @@ fail:
 	return -1;
 }
 
+int
+txn_commit_nop(struct request *request)
+{
+	assert(request->header != NULL);
+
+	struct txn *txn = in_txn();
+	if (txn == NULL) {
+		txn = txn_begin(true);
+		if (txn == NULL)
+			return -1;
+	}
+
+	struct txn_stmt *stmt = txn_stmt_new();
+	if (stmt == NULL)
+		goto fail;
+	if (txn_add_redo(stmt, request) != 0)
+		goto fail;
+
+	txn->n_rows++;
+	stailq_add_tail_entry(&txn->stmts, stmt, next);
+
+	if (txn->is_autocommit && txn->in_sub_stmt == 0)
+		return txn_commit(txn);
+	return 0;
+fail:
+	if (txn->is_autocommit && txn->in_sub_stmt == 0)
+		txn_rollback();
+	return -1;
+}
 
 static int64_t
 txn_write_to_wal(struct txn *txn)
@@ -287,32 +317,31 @@ txn_commit(struct txn *txn)
 {
 	assert(txn == in_txn());
 
-	assert(stailq_empty(&txn->stmts) || txn->engine);
-
 	/* Do transaction conflict resolving */
-	if (txn->engine) {
-		if (engine_prepare(txn->engine, txn) != 0)
+	if (txn->engine != NULL &&
+	    engine_prepare(txn->engine, txn) != 0)
+		goto fail;
+
+	if (txn->n_rows > 0) {
+		txn->signature = txn_write_to_wal(txn);
+		if (txn->signature < 0)
 			goto fail;
-
-		if (txn->n_rows > 0) {
-			txn->signature = txn_write_to_wal(txn);
-			if (txn->signature < 0)
-				goto fail;
-		}
-		/*
-		 * The transaction is in the binary log. No action below
-		 * may throw. In case an error has happened, there is
-		 * no other option but terminate.
-		 */
-		if (txn->has_triggers &&
-		    trigger_run(&txn->on_commit, txn) != 0) {
-			diag_log();
-			unreachable();
-			panic("commit trigger failed");
-		}
-
-		engine_commit(txn->engine, txn);
 	}
+	/*
+	 * The transaction is in the binary log. No action below
+	 * may throw. In case an error has happened, there is
+	 * no other option but terminate.
+	 */
+	if (txn->has_triggers &&
+	    trigger_run(&txn->on_commit, txn) != 0) {
+		diag_log();
+		unreachable();
+		panic("commit trigger failed");
+	}
+
+	if (txn->engine != NULL)
+		engine_commit(txn->engine, txn);
+
 	TRASH(txn);
 	/** Free volatile txn memory. */
 	fiber_gc();
@@ -470,7 +499,7 @@ box_txn_rollback_to_savepoint(box_txn_savepoint_t *svp)
 	}
 	struct txn_stmt *stmt = svp->stmt == NULL ? NULL :
 			stailq_entry(svp->stmt, struct txn_stmt, next);
-	if (stmt != NULL && stmt->space == NULL) {
+	if (stmt != NULL && stmt->space == NULL && stmt->row == NULL) {
 		/*
 		 * The statement at which this savepoint was
 		 * created has been rolled back.

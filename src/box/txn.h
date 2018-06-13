@@ -253,6 +253,18 @@ void
 txn_rollback_stmt();
 
 /**
+ * Commit a no-op request.
+ *
+ * A no-op request does not affect any space, but it
+ * promotes vclock and is written to WAL.
+ *
+ * This function can be called both as a part of an
+ * independent transaction and in autocommit mode.
+ */
+int
+txn_commit_nop(struct request *request);
+
+/**
  * Raise an error if this is a multi-statement
  * transaction: DDL can not be part of a multi-statement
  * transaction and must be run in autocommit mode.

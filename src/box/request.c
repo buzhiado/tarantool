@@ -50,7 +50,6 @@ request_create_from_tuple(struct request *request, struct space *space,
 			  struct tuple *old_tuple, struct tuple *new_tuple)
 {
 	memset(request, 0, sizeof(*request));
-	request->space_id = space->def->id;
 
 	if (old_tuple == new_tuple) {
 		/*
@@ -61,6 +60,7 @@ request_create_from_tuple(struct request *request, struct space *space,
 		return 0;
 	}
 
+	request->space_id = space->def->id;
 	if (new_tuple == NULL) {
 		uint32_t size, key_size;
 		const char *data = tuple_data_range(old_tuple, &size);
