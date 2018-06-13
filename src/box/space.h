@@ -193,7 +193,17 @@ space_name(const struct space *space)
 
 /** Return true if space is temporary. */
 static inline bool
-space_is_temporary(struct space *space) { return space->def->opts.temporary; }
+space_is_temporary(struct space *space)
+{
+	return space->def->opts.temporary;
+}
+
+/** Return true if space is replica local. */
+static inline bool
+space_is_local(struct space *space)
+{
+	return space->def->opts.local;
+}
 
 void
 space_run_triggers(struct space *space, bool yesno);

@@ -35,10 +35,12 @@
 
 const struct space_opts space_opts_default = {
 	/* .temporary = */ false,
+	/* .local = */ false,
 };
 
 const struct opt_def space_opts_reg[] = {
 	OPT_DEF("temporary", OPT_BOOL, struct space_opts, temporary),
+	OPT_DEF("is_local", OPT_BOOL, struct space_opts, local),
 	OPT_END,
 };
 

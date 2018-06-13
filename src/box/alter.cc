@@ -1628,6 +1628,10 @@ on_replace_dd_space(struct trigger * /* trigger */, void *event)
 			tnt_raise(ClientError, ER_ALTER_SPACE,
 				  space_name(old_space),
 				  "can not change space engine");
+		if (def->opts.local != space_is_local(old_space))
+			tnt_raise(ClientError, ER_ALTER_SPACE,
+				  space_name(old_space),
+				  "can not switch local flag");
 		/*
 		 * Allow change of space properties, but do it
 		 * in WAL-error-safe mode.

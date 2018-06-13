@@ -64,6 +64,7 @@ txn_add_redo(struct txn_stmt *stmt, struct request *request)
 	row->lsn = 0;
 	row->sync = 0;
 	row->tm = 0;
+	row->is_local = false;
 	row->bodycnt = xrow_encode_dml(request, row->body);
 	if (row->bodycnt < 0)
 		return -1;
@@ -214,6 +215,8 @@ txn_commit_stmt(struct txn *txn, struct request *request)
 	if (!space_is_temporary(stmt->space)) {
 		if (txn_add_redo(stmt, request) != 0)
 			goto fail;
+		if (space_is_local(stmt->space))
+			stmt->row->is_local = true;
 		++txn->n_rows;
 	}
 	/*

@@ -48,6 +48,11 @@ struct space_opts {
 	 * - changes are not part of a snapshot
 	 */
 	bool temporary;
+	/**
+	 * The space is replica local: changes
+	 * done to it are not replicated.
+	 */
+	bool local;
 };
 
 extern const struct space_opts space_opts_default;

@@ -106,6 +106,9 @@ error:
 		case IPROTO_SCHEMA_VERSION:
 			header->schema_version = mp_decode_uint(pos);
 			break;
+		case IPROTO_IS_LOCAL:
+			header->is_local = mp_decode_bool(pos);
+			break;
 		default:
 			/* unknown header */
 			mp_next(pos);
@@ -175,6 +178,12 @@ xrow_header_encode(const struct xrow_header *header, uint64_t sync,
 	if (header->replica_id) {
 		d = mp_encode_uint(d, IPROTO_REPLICA_ID);
 		d = mp_encode_uint(d, header->replica_id);
+		map_size++;
+	}
+
+	if (header->is_local) {
+		d = mp_encode_uint(d, IPROTO_IS_LOCAL);
+		d = mp_encode_bool(d, header->is_local);
 		map_size++;
 	}
 

@@ -211,6 +211,11 @@ lbox_xlog_parser_iterate(struct lua_State *L)
 		lua_pushinteger(L, row.replica_id);
 		lua_settable(L, -3); /* replica_id */
 	}
+	if (row.is_local) {
+		lbox_xlog_pushkey(L, iproto_key_name(IPROTO_IS_LOCAL));
+		lua_pushboolean(L, row.is_local);
+		lua_settable(L, -3); /* is_local */
+	}
 	if (row.tm != 0) {
 		lbox_xlog_pushkey(L, iproto_key_name(IPROTO_TIMESTAMP));
 		lua_pushnumber(L, row.tm);
