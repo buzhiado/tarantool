@@ -31,10 +31,6 @@ box.info.vclock
 s = box.space._schema
 ---
 ...
--- we need to have at least one record in the
--- xlog otherwise the server believes that there
--- is an lsn gap during recovery.
---
 s:replace{"key", 'test 1'}
 ---
 - ['key', 'test 1']
@@ -83,8 +79,8 @@ t
   - Failed to write to disk
 ...
 --
--- Before restart: oops, our LSN is 11,
--- even though we didn't insert anything.
+-- Before restart: our LSN is 1, because
+-- we didn't insert anything.
 --
 name = string.match(arg[0], "([^,]+)%.lua")
 ---
@@ -100,8 +96,7 @@ require('fio').glob(name .. "/*.xlog")
 test_run:cmd("restart server panic")
 --
 -- after restart: our LSN is the LSN of the
--- last *written* row, all the failed
--- rows are gone from lsn counter.
+-- last written row, i.e. 1 again.
 --
 box.info.vclock
 ---
@@ -161,9 +156,7 @@ box.error.injection.set("ERRINJ_WAL_WRITE", false)
 ...
 --
 -- Write a good row after a series of failed
--- rows. There is a gap in LSN, correct,
--- but it's *inside* a single WAL, so doesn't
--- affect WAL search in recover_remaining_wals()
+-- rows. There is no gap in LSN.
 --
 s:replace{'key', 'test 2'}
 ---
@@ -176,12 +169,12 @@ s:replace{'key', 'test 2'}
 --
 box.info.vclock
 ---
-- {1: 12}
+- {1: 2}
 ...
 test_run:cmd("restart server panic")
 box.info.vclock
 ---
-- {1: 12}
+- {1: 2}
 ...
 box.space._schema:select{'key'}
 ---
@@ -217,7 +210,7 @@ require('fio').glob(name .. "/*.xlog")
 ---
 - - panic/00000000000000000000.xlog
   - panic/00000000000000000001.xlog
-  - panic/00000000000000000012.xlog
+  - panic/00000000000000000002.xlog
 ...
 box.error.injection.set("ERRINJ_WAL_WRITE", true)
 ---
@@ -229,14 +222,14 @@ box.space._schema:replace{"key", 'test 3'}
 ...
 box.info.vclock
 ---
-- {1: 22}
+- {1: 12}
 ...
 require('fio').glob(name .. "/*.xlog")
 ---
 - - panic/00000000000000000000.xlog
   - panic/00000000000000000001.xlog
+  - panic/00000000000000000002.xlog
   - panic/00000000000000000012.xlog
-  - panic/00000000000000000022.xlog
 ...
 -- and the next one (just to be sure
 box.space._schema:replace{"key", 'test 3'}
@@ -245,14 +238,14 @@ box.space._schema:replace{"key", 'test 3'}
 ...
 box.info.vclock
 ---
-- {1: 22}
+- {1: 12}
 ...
 require('fio').glob(name .. "/*.xlog")
 ---
 - - panic/00000000000000000000.xlog
   - panic/00000000000000000001.xlog
+  - panic/00000000000000000002.xlog
   - panic/00000000000000000012.xlog
-  - panic/00000000000000000022.xlog
 ...
 box.error.injection.set("ERRINJ_WAL_WRITE", false)
 ---
@@ -265,14 +258,14 @@ box.space._schema:replace{"key", 'test 4'}
 ...
 box.info.vclock
 ---
-- {1: 25}
+- {1: 13}
 ...
 require('fio').glob(name .. "/*.xlog")
 ---
 - - panic/00000000000000000000.xlog
   - panic/00000000000000000001.xlog
+  - panic/00000000000000000002.xlog
   - panic/00000000000000000012.xlog
-  - panic/00000000000000000022.xlog
 ...
 -- restart is ok
 test_run:cmd("restart server panic")

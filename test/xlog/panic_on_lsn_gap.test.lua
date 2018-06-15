@@ -13,10 +13,6 @@ test_run:cmd("start server panic")
 test_run:cmd("switch panic")
 box.info.vclock
 s = box.space._schema
--- we need to have at least one record in the
--- xlog otherwise the server believes that there
--- is an lsn gap during recovery.
---
 s:replace{"key", 'test 1'}
 box.info.vclock
 box.error.injection.set("ERRINJ_WAL_WRITE", true)
@@ -34,8 +30,8 @@ end;
 test_run:cmd("setopt delimiter ''");
 t
 --
--- Before restart: oops, our LSN is 11,
--- even though we didn't insert anything.
+-- Before restart: our LSN is 1, because
+-- we didn't insert anything.
 --
 name = string.match(arg[0], "([^,]+)%.lua")
 box.info.vclock
@@ -43,8 +39,7 @@ require('fio').glob(name .. "/*.xlog")
 test_run:cmd("restart server panic")
 --
 -- after restart: our LSN is the LSN of the
--- last *written* row, all the failed
--- rows are gone from lsn counter.
+-- last written row, i.e. 1 again.
 --
 box.info.vclock
 box.space._schema:select{'key'}
@@ -65,9 +60,7 @@ box.info.vclock
 box.error.injection.set("ERRINJ_WAL_WRITE", false)
 --
 -- Write a good row after a series of failed
--- rows. There is a gap in LSN, correct,
--- but it's *inside* a single WAL, so doesn't
--- affect WAL search in recover_remaining_wals()
+-- rows. There is no gap in LSN.
 --
 s:replace{'key', 'test 2'}
 --

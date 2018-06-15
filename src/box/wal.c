@@ -637,14 +637,18 @@ wal_write_to_disk(struct cmsg *msg)
 	 */
 	struct journal_entry *entry;
 	struct stailq_entry *last_committed = NULL;
+	struct vclock last_committed_vclock;
+	vclock_copy(&last_committed_vclock, &writer->vclock);
 	stailq_foreach_entry(entry, &wal_msg->commit, fifo) {
 		wal_assign_lsn(writer, entry->rows, entry->rows + entry->n_rows);
 		entry->res = vclock_sum(&writer->vclock);
 		int rc = xlog_write_entry(l, entry);
 		if (rc < 0)
 			goto done;
-		if (rc > 0)
+		if (rc > 0) {
 			last_committed = &entry->fifo;
+			vclock_copy(&last_committed_vclock, &writer->vclock);
+		}
 		/* rc == 0: the write is buffered in xlog_tx */
 	}
 	if (xlog_flush(l) < 0)
@@ -670,6 +674,8 @@ done:
 	stailq_cut_tail(&wal_msg->commit, last_committed, &rollback);
 
 	if (!stailq_empty(&rollback)) {
+		/* Reset WAL writer vclock. */
+		vclock_copy(&writer->vclock, &last_committed_vclock);
 		/* Update status of the successfully committed requests. */
 		stailq_foreach_entry(entry, &rollback, fifo)
 			entry->res = -1;
