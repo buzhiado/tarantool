@@ -188,6 +188,7 @@ require('fio').glob(name .. "/*.xlog")
 ---
 - - panic/00000000000000000000.xlog
   - panic/00000000000000000001.xlog
+  - panic/00000000000000000002.xlog
 ...
 -- now insert 10 rows - so that the next
 -- row will need to switch the WAL

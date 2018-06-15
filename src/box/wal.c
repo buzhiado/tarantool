@@ -310,6 +310,39 @@ wal_thread_start()
 	cpipe_set_max_input(&wal_thread.wal_pipe, IOV_MAX);
 }
 
+static int
+wal_init_f(struct cbus_call_msg *msg)
+{
+	(void)msg;
+
+	struct wal_writer *writer = &wal_writer_singleton;
+
+	/*
+	 * Check if the next WAL file already exists. If it does,
+	 * it must have been created on shutdown, try to reopen it.
+	 */
+	const char *path = xdir_format_filename(&writer->wal_dir,
+				vclock_sum(&writer->vclock), NONE);
+	if (access(path, F_OK) == 0) {
+		if (xlog_open(&writer->current_wal, path) == 0)
+			return 0;
+		/*
+		 * The WAL file seems to be corrupted. Rename it
+		 * so that we can proceed.
+		 */
+		say_info("rename corrupted %s", path);
+		char new_path[PATH_MAX];
+		snprintf(new_path, sizeof(new_path), "%s.corrupted", path);
+		if (rename(path, new_path) != 0) {
+			diag_set(SystemError,
+				 "%s: can't rename corrupted xlog", path);
+			diag_log();
+			return -1;
+		}
+	}
+	return 0;
+}
+
 /**
  * Initialize WAL writer.
  *
@@ -330,6 +363,11 @@ wal_init(enum wal_mode wal_mode, const char *wal_dirname,
 			  vclock, wal_max_rows, wal_max_size);
 
 	if (xdir_scan(&writer->wal_dir))
+		return -1;
+
+	struct cbus_call_msg msg;
+	if (cbus_call(&wal_thread.wal_pipe, &wal_thread.tx_pipe, &msg,
+		      wal_init_f, NULL, TIMEOUT_INFINITY) != 0)
 		return -1;
 
 	journal_set(&writer->base);
@@ -382,8 +420,7 @@ wal_checkpoint_f(struct cmsg *data)
 
 		xlog_close(&writer->current_wal, false);
 		/*
-		 * Avoid creating an empty xlog if this is the
-		 * last snapshot before shutdown.
+		 * The next WAL will be created on first write.
 		 */
 	}
 	vclock_copy(msg->vclock, &writer->vclock);
@@ -710,6 +747,15 @@ wal_thread_f(va_list ap)
 	struct wal_writer *writer = &wal_writer_singleton;
 
 	if (xlog_is_open(&writer->current_wal))
+		xlog_close(&writer->current_wal, false);
+
+	/*
+	 * Create a new empty WAL on shutdown so that we don't have
+	 * to rescan the last WAL to find the instance vclock.
+	 */
+	if (writer->wal_mode != WAL_NONE &&
+	    xdir_create_xlog(&writer->wal_dir, &writer->current_wal,
+			     &writer->vclock) == 0)
 		xlog_close(&writer->current_wal, false);
 
 	if (xlog_is_open(&vy_log_writer.xlog))
