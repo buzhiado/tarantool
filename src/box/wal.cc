@@ -41,6 +41,7 @@
 #include "cbus.h"
 #include "coio_task.h"
 #include "replication.h"
+#include "gc.h"
 
 
 const char *wal_mode_STRS[] = { "none", "write", "fsync", NULL };
@@ -64,6 +65,8 @@ struct wal_thread {
 	 * priority pipe and DOES NOT support yield.
 	 */
 	struct cpipe tx_prio_pipe;
+	/** Return pipe from 'wal' to tx' */
+	struct cpipe tx_pipe;
 };
 
 /*
@@ -585,6 +588,13 @@ wal_assign_lsn(struct wal_writer *writer, struct xrow_header **row,
 }
 
 static void
+gc_status_update(struct cmsg *msg)
+{
+	gc_xdir_clean_notify();
+	free(msg);
+}
+
+static void
 wal_write_to_disk(struct cmsg *msg)
 {
 	struct wal_writer *writer = &wal_writer_singleton;
@@ -655,6 +665,19 @@ done:
 		/* Until we can pass the error to tx, log it and clear. */
 		error_log(error);
 		diag_clear(diag_get());
+		if (errno == ENOSPC) {
+			struct cmsg *msg =
+			    (struct cmsg*)calloc(1, sizeof(struct cmsg));
+			if (msg == NULL) {
+				say_error("failed to allocate cmsg");
+			} else {
+				static const struct cmsg_hop route[] = {
+					{gc_status_update, NULL}
+				};
+				cmsg_init(msg, route);
+				cpipe_push(&wal_thread.tx_pipe, msg);
+			}
+		}
 	}
 	/*
 	 * We need to start rollback from the first request
@@ -695,6 +718,7 @@ wal_thread_f(va_list ap)
 	 * even when tx fiber pool is used up by net messages.
 	 */
 	cpipe_create(&wal_thread.tx_prio_pipe, "tx_prio");
+	cpipe_create(&wal_thread.tx_pipe, "tx");
 
 	cbus_loop(&endpoint);
 
@@ -707,6 +731,7 @@ wal_thread_f(va_list ap)
 		xlog_close(&vy_log_writer.xlog, false);
 
 	cpipe_destroy(&wal_thread.tx_prio_pipe);
+	cpipe_destroy(&wal_thread.tx_pipe);
 	return 0;
 }
 

@@ -31,8 +31,11 @@
  * SUCH DAMAGE.
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "replication.h"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -82,11 +85,24 @@ struct gc_consumer *
 gc_consumer_register(const char *name, int64_t signature);
 
 /**
+ * Bind consumer with associated replica (if any).
+ */
+void
+gc_consumer_set_replica(struct gc_consumer *gc, struct replica *replica);
+
+/**
  * Unregister a consumer and invoke garbage collection
  * if needed.
  */
 void
 gc_consumer_unregister(struct gc_consumer *consumer);
+
+/**
+ * Notify gc to clean xdir because of running out
+ * of disk space.
+ */
+void
+gc_xdir_clean_notify();
 
 /**
  * Advance the vclock signature tracked by a consumer and

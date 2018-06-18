@@ -61,6 +61,8 @@ struct gc_consumer {
 	char *name;
 	/** The vclock signature tracked by this consumer. */
 	int64_t signature;
+	/** Replica associated with consumer (if any). */
+	struct replica *replica;
 };
 
 typedef rb_tree(struct gc_consumer) gc_tree_t;
@@ -123,10 +125,18 @@ gc_consumer_new(const char *name, int64_t signature)
 	return consumer;
 }
 
+void
+gc_consumer_set_replica(struct gc_consumer *gc, struct replica *replica)
+{
+	gc->replica = replica;
+}
+
 /** Free a consumer object. */
 static void
 gc_consumer_delete(struct gc_consumer *consumer)
 {
+	if (consumer->replica != NULL)
+		consumer->replica->gc = NULL;
 	free(consumer->name);
 	TRASH(consumer);
 	free(consumer);
@@ -214,6 +224,45 @@ void
 gc_set_checkpoint_count(int checkpoint_count)
 {
 	gc.checkpoint_count = checkpoint_count;
+}
+
+void
+gc_xdir_clean_notify()
+{
+	/*
+	 * Compare the current time with the time of the last run.
+	 * This is needed in case of multiple failures to prevent
+	 * from deleting all replicas.
+	 */
+	static double prev_time = 0.;
+	double cur_time = ev_monotonic_time();
+	if (cur_time - prev_time < 1.)
+		return;
+	prev_time = cur_time;
+	/**
+	 * Delete consumer with the least recent vclock and start
+	 * garbage collection. If nothing to delete find next
+	 * consumer etc. Originally created for cases with running
+	 * out of disk space because of disconnected replica.
+	 */
+	struct gc_consumer *leftmost =
+	    gc_tree_first(&gc.consumers);
+	/*
+	 * Exit if no consumers left or if this consumer is
+	 * not associated with replica (backup for example).
+	 */
+	if (leftmost == NULL || leftmost->replica == NULL)
+		return;
+	int64_t signature = leftmost->signature;
+	while (true) {
+		gc_consumer_unregister(leftmost);
+		leftmost = gc_tree_first(&gc.consumers);
+		if (leftmost == NULL || leftmost->replica == NULL ||
+		    leftmost->signature > signature) {
+			gc_run();
+			return;
+		}
+	}
 }
 
 struct gc_consumer *
