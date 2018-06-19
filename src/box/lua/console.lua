@@ -67,6 +67,7 @@ local function set_language(storage, value)
         local msg = 'Invalid language "%s", supported languages: lua and sql.'
         return error(msg:format(value))
     end
+    set_delimiter(storage, value == 'sql' and ';' or nil)
     storage.language = value
     return true
 end
@@ -316,7 +317,11 @@ local function local_read(self)
                 break
             end
         elseif #buf >= #delim and buf:sub(#buf - #delim + 1) == delim then
-            buf = buf:sub(0, #buf - #delim)
+            local sub_len = #buf - #delim
+            if box.session.language == 'sql' and delim == ';' then
+                sub_len = sub_len + 1
+            end
+            buf = buf:sub(0, sub_len)
             break
         end
         buf = buf.."\n"
@@ -354,8 +359,12 @@ local function client_read(self)
         -- Escape sequence to close current connection (like SSH)
         return nil
     end
-    -- remove trailing delimiter
-    return buf:sub(1, -#delim-1)
+    -- remove trailing delimiter if it is not SQL ;
+    if box.session.language == 'sql' and delim == ';' then
+        return buf
+    else
+        return buf:sub(1, -#delim-1)
+    end
 end
 
 --
