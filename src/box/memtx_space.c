@@ -553,12 +553,13 @@ memtx_space_execute_upsert(struct space *space, struct txn *txn,
  * doesn't take txn as an argument.
  */
 static int
-memtx_space_ephemeral_replace(struct space *space, const char *tuple,
-				      const char *tuple_end)
+memtx_space_ephemeral_replace(struct space *space, struct txn *txn,
+			      struct request *request, struct tuple **result)
 {
+	(void)txn;
 	struct memtx_space *memtx_space = (struct memtx_space *)space;
-	struct tuple *new_tuple = memtx_tuple_new(space->format, tuple,
-						  tuple_end);
+	struct tuple *new_tuple = memtx_tuple_new(space->format, request->tuple,
+						  request->tuple_end);
 	if (new_tuple == NULL)
 		return -1;
 	tuple_ref(new_tuple);
@@ -568,6 +569,8 @@ memtx_space_ephemeral_replace(struct space *space, const char *tuple,
 		tuple_unref(new_tuple);
 		return -1;
 	}
+	if (result != NULL)
+		*result = new_tuple;
 	if (old_tuple != NULL)
 		tuple_unref(old_tuple);
 	return 0;
@@ -587,12 +590,15 @@ memtx_space_ephemeral_replace(struct space *space, const char *tuple,
  * it isn't involved in any transaction routine.
  */
 static int
-memtx_space_ephemeral_delete(struct space *space, const char *key)
+memtx_space_ephemeral_delete(struct space *space, struct txn *txn,
+			     struct request *request, struct tuple **result)
 {
+	(void)txn;
 	struct memtx_space *memtx_space = (struct memtx_space *)space;
 	struct index *primary_index = space_index(space, 0 /* primary index*/);
 	if (primary_index == NULL)
 		return -1;
+	const char *key = request->key;
 	uint32_t part_count = mp_decode_array(&key);
 	struct tuple *old_tuple;
 	if (index_get(primary_index, key, part_count, &old_tuple) != 0)
@@ -601,7 +607,160 @@ memtx_space_ephemeral_delete(struct space *space, const char *key)
 	    memtx_space->replace(space, old_tuple, NULL,
 				 DUP_REPLACE, &old_tuple) != 0)
 		return -1;
-	tuple_unref(old_tuple);
+	if (result == NULL)
+		tuple_unref(old_tuple);
+	else
+		*result = old_tuple;
+	return 0;
+}
+
+static int
+memtx_space_ephemeral_update(struct space *space, struct txn *txn,
+			     struct request *request, struct tuple **result)
+{
+	(void)txn;
+	struct memtx_space *memtx_space = (struct memtx_space *)space;
+	struct index *primary_index = space_index(space, 0 /* primary index*/);
+	if (primary_index == NULL)
+		return -1;
+	const char *key = request->key;
+	uint32_t part_count = mp_decode_array(&key);
+	struct tuple *old_tuple;
+	if (index_get(primary_index, key, part_count, &old_tuple) != 0)
+		return -1;
+	if (old_tuple == NULL)
+		return 0;
+
+	/* Update the tuple; legacy, request ops are in request->tuple */
+	uint32_t new_size = 0, bsize;
+	const char *old_data = tuple_data_range(old_tuple, &bsize);
+	const char *new_data =
+		tuple_update_execute(region_aligned_alloc_cb, &fiber()->gc,
+				     request->tuple, request->tuple_end,
+				     old_data, old_data + bsize,
+				     &new_size, request->index_base, NULL);
+	if (new_data == NULL)
+		return -1;
+	struct tuple *new_tuple = memtx_tuple_new(space->format, new_data,
+						  new_data + new_size);
+	if (new_tuple == NULL)
+		return -1;
+	tuple_ref(new_tuple);
+	if (memtx_space->replace(space, old_tuple, new_tuple,
+				 DUP_REPLACE_OR_INSERT, &old_tuple) != 0) {
+		tuple_unref(new_tuple);
+		return -1;
+	}
+	if(result == NULL)
+		tuple_unref(new_tuple);
+	else
+		*result = new_tuple;
+	return 0;
+}
+
+static int
+memtx_space_ephemeral_upsert(struct space *space, struct txn *txn,
+			     struct request *request)
+{
+	(void)txn;
+	struct memtx_space *memtx_space = (struct memtx_space *)space;
+	/*
+	 * Check all tuple fields: we should produce an error on
+	 * malformed tuple even if upsert turns into an update.
+	 */
+	if (tuple_validate_raw(space->format, request->tuple))
+		return -1;
+
+	struct index *primary_index = space_index(space, 0 /* primary index*/);
+	if (primary_index == NULL)
+		return -1;
+	const char *key = request->key;
+	uint32_t part_count = mp_decode_array(&key);
+	struct tuple *old_tuple;
+	struct tuple *new_tuple;
+	if (index_get(primary_index, key, part_count, &old_tuple) != 0)
+		return -1;
+	if (old_tuple == NULL) {
+		/**
+		 * Old tuple was not found. A write optimized
+		 * engine may only know this after commit, so
+		 * some errors which happen on this branch would
+		 * only make it to the error log in it.
+		 * To provide identical semantics, we should not throw
+		 * anything. However, considering the kind of
+		 * error which may occur, throwing it won't break
+		 * cross-engine compatibility:
+		 * - update ops are checked before commit
+		 * - OOM may happen at any time
+		 * - duplicate key has to be checked by
+		 *   write-optimized engine before commit, so if
+		 *   we get it here, it's also OK to throw it
+		 * @sa https://github.com/tarantool/tarantool/issues/1156
+		 */
+		if (tuple_update_check_ops(region_aligned_alloc_cb,
+					   &fiber()->gc,
+					   request->ops, request->ops_end,
+					   request->index_base)) {
+			return -1;
+		}
+		new_tuple = memtx_tuple_new(space->format,
+					    request->tuple,
+					    request->tuple_end);
+		if (new_tuple == NULL)
+			return -1;
+		tuple_ref(new_tuple);
+	} else {
+		uint32_t new_size = 0, bsize;
+		const char *old_data = tuple_data_range(old_tuple, &bsize);
+		/*
+		 * Update the tuple.
+		 * tuple_upsert_execute() fails on totally wrong
+		 * tuple ops, but ignores ops that not suitable
+		 * for the tuple.
+		 */
+		uint64_t column_mask = COLUMN_MASK_FULL;
+		const char *new_data =
+			tuple_upsert_execute(region_aligned_alloc_cb,
+					     &fiber()->gc, request->ops,
+					     request->ops_end, old_data,
+					     old_data + bsize, &new_size,
+					     request->index_base, false,
+					     &column_mask);
+		if (new_data == NULL)
+			return -1;
+		new_tuple = memtx_tuple_new(space->format, new_data,
+					    new_data + new_size);
+		if (new_tuple == NULL)
+			return -1;
+		tuple_ref(new_tuple);
+		struct index *pk = space->index[0];
+		if (!key_update_can_be_skipped(pk->def->key_def->column_mask,
+					       column_mask) &&
+		    tuple_compare(old_tuple, new_tuple,
+				  pk->def->key_def) != 0) {
+			/* Primary key is changed: log error and do nothing. */
+			diag_set(ClientError, ER_CANT_UPDATE_PRIMARY_KEY,
+				 pk->def->name, space_name(space));
+			diag_log();
+			tuple_unref(new_tuple);
+			old_tuple = NULL;
+			new_tuple = NULL;
+		}
+	}
+	/*
+	 * It's OK to use DUP_REPLACE_OR_INSERT: we don't risk
+	 * inserting a new tuple if the old one exists, since
+	 * we checked this case explicitly and skipped the upsert
+	 * above.
+	 */
+	if (new_tuple != NULL &&
+	    memtx_space->replace(space, old_tuple, new_tuple,
+				 DUP_REPLACE_OR_INSERT, &old_tuple) != 0) {
+		tuple_unref(new_tuple);
+		return -1;
+	}
+	if (old_tuple != NULL)
+		tuple_unref(old_tuple);
 	return 0;
 }
 
@@ -842,10 +1001,7 @@ memtx_init_system_space(struct space *space)
 }
 
 static void
-memtx_init_ephemeral_space(struct space *space)
-{
-	memtx_space_add_primary_key(space);
-}
+memtx_init_ephemeral_space(struct space *space);
 
 static int
 memtx_space_build_index(struct space *src_space, struct index *new_index,
@@ -943,8 +1099,6 @@ static const struct space_vtab memtx_space_vtab = {
 	/* .execute_delete = */ memtx_space_execute_delete,
 	/* .execute_update = */ memtx_space_execute_update,
 	/* .execute_upsert = */ memtx_space_execute_upsert,
-	/* .ephemeral_replace = */ memtx_space_ephemeral_replace,
-	/* .ephemeral_delete = */ memtx_space_ephemeral_delete,
 	/* .init_system_space = */ memtx_init_system_space,
 	/* .init_ephemeral_space = */ memtx_init_ephemeral_space,
 	/* .check_index_def = */ memtx_space_check_index_def,
@@ -956,6 +1110,33 @@ static const struct space_vtab memtx_space_vtab = {
 	/* .swap_index = */ generic_space_swap_index,
 	/* .prepare_alter = */ memtx_space_prepare_alter,
 };
+
+static const struct space_vtab memtx_space_ephemeral_vtab = {
+	/* .destroy = */ memtx_space_destroy,
+	/* .bsize = */ memtx_space_bsize,
+	/* .apply_initial_join_row = */ memtx_space_apply_initial_join_row,
+	/* .execute_replace = */ memtx_space_ephemeral_replace,
+	/* .execute_delete = */ memtx_space_ephemeral_delete,
+	/* .execute_update = */ memtx_space_ephemeral_update,
+	/* .execute_upsert = */ memtx_space_ephemeral_upsert,
+	/* .init_system_space = */ memtx_init_system_space,
+	/* .init_ephemeral_space = */ memtx_init_ephemeral_space,
+	/* .check_index_def = */ memtx_space_check_index_def,
+	/* .create_index = */ memtx_space_create_index,
+	/* .add_primary_key = */ memtx_space_add_primary_key,
+	/* .drop_primary_key = */ memtx_space_drop_primary_key,
+	/* .check_format  = */ memtx_space_check_format,
+	/* .build_index = */ memtx_space_build_index,
+	/* .swap_index = */ generic_space_swap_index,
+	/* .prepare_alter = */ memtx_space_prepare_alter,
+};
+
+static void
+memtx_init_ephemeral_space(struct space *space)
+{
+	space->vtab = &memtx_space_ephemeral_vtab;
+	memtx_space_add_primary_key(space);
+}
 
 struct space *
 memtx_space_new(struct memtx_engine *memtx,

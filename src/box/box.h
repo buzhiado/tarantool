@@ -401,6 +401,27 @@ box_sequence_reset(uint32_t seq_id);
 int
 box_process1(struct request *request, box_tuple_t **result);
 
+int
+box_ephemeral_insert(struct space *space, const char *tuple,
+		     const char *tuple_end, box_tuple_t **result);
+
+int
+box_ephemeral_replace(struct space *space, const char *tuple,
+		      const char *tuple_end, box_tuple_t **result);
+
+int
+box_ephemeral_delete(struct space *space, uint32_t index_id, const char *key,
+		     const char *key_end, box_tuple_t **result);
+
+int
+box_ephemeral_update(struct space *space, uint32_t index_id, const char *key,
+		     const char *key_end, const char *ops, const char *ops_end,
+		     int index_base, box_tuple_t **result);
+
+int
+box_ephemeral_upsert(struct space *space, uint32_t index_id, const char *tuple,
+		     const char *tuple_end, const char *ops,
+		     const char *ops_end, int index_base, box_tuple_t **result);
 /**
  * Execute request on given space.
  *

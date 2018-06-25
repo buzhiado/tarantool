@@ -67,10 +67,6 @@ struct space_vtab {
 			      struct request *, struct tuple **result);
 	int (*execute_upsert)(struct space *, struct txn *, struct request *);
 
-	int (*ephemeral_replace)(struct space *, const char *, const char *);
-
-	int (*ephemeral_delete)(struct space *, const char *);
-
 	void (*init_system_space)(struct space *);
 	/**
 	 * Initialize an ephemeral space instance.
@@ -299,16 +295,27 @@ space_execute_dml(struct space *space, struct txn *txn,
 		  struct request *request, struct tuple **result);
 
 static inline int
-space_ephemeral_replace(struct space *space, const char *tuple,
-			const char *tuple_end)
+space_ephemeral_replace(struct space *space, struct request *request)
 {
-	return space->vtab->ephemeral_replace(space, tuple, tuple_end);
+	return space->vtab->execute_replace(space, NULL, request, NULL);
 }
 
 static inline int
-space_ephemeral_delete(struct space *space, const char *key)
+space_ephemeral_delete(struct space *space, struct request *request)
 {
-	return space->vtab->ephemeral_delete(space, key);
+	return space->vtab->execute_delete(space, NULL, request, NULL);
+}
+
+static inline int
+space_ephemeral_update(struct space *space, struct request *request)
+{
+	return space->vtab->execute_update(space, NULL, request, NULL);
+}
+
+static inline int
+space_ephemeral_upsert(struct space *space, struct request *request)
+{
+	return space->vtab->execute_upsert(space, NULL, request);
 }
 
 /**

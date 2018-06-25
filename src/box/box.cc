@@ -1150,6 +1150,90 @@ box_upsert(uint32_t space_id, uint32_t index_id, const char *tuple,
 	return box_process1(&request, result);
 }
 
+int
+box_ephemeral_insert(struct space *space, const char *tuple,
+		     const char *tuple_end, box_tuple_t **result)
+{
+	mp_tuple_assert(tuple, tuple_end);
+	struct request request;
+	memset(&request, 0, sizeof(request));
+	request.type = IPROTO_INSERT;
+	request.space_id = space->def->id;
+	request.tuple = tuple;
+	request.tuple_end = tuple_end;
+	return space_execute_dml(space, NULL, &request, result);
+}
+
+int
+box_ephemeral_replace(struct space *space, const char *tuple,
+		      const char *tuple_end, box_tuple_t **result)
+{
+	mp_tuple_assert(tuple, tuple_end);
+	struct request request;
+	memset(&request, 0, sizeof(request));
+	request.type = IPROTO_REPLACE;
+	request.space_id = space->def->id;
+	request.tuple = tuple;
+	request.tuple_end = tuple_end;
+	return space_execute_dml(space, NULL, &request, result);
+}
+
+int
+box_ephemeral_delete(struct space *space, uint32_t index_id, const char *key,
+		     const char *key_end, box_tuple_t **result)
+{
+	mp_tuple_assert(key, key_end);
+	struct request request;
+	memset(&request, 0, sizeof(request));
+	request.type = IPROTO_DELETE;
+	request.space_id = space->def->id;
+	request.index_id = index_id;
+	request.key = key;
+	request.key_end = key_end;
+	return space_execute_dml(space, NULL, &request, result);
+}
+
+int
+box_ephemeral_update(struct space *space, uint32_t index_id, const char *key,
+		     const char *key_end, const char *ops, const char *ops_end,
+		     int index_base, box_tuple_t **result)
+{
+	mp_tuple_assert(key, key_end);
+	mp_tuple_assert(ops, ops_end);
+	struct request request;
+	memset(&request, 0, sizeof(request));
+	request.type = IPROTO_UPDATE;
+	request.space_id = space->def->id;
+	request.index_id = index_id;
+	request.key = key;
+	request.key_end = key_end;
+	request.index_base = index_base;
+	/** Legacy: in case of update, ops are passed in in request tuple */
+	request.tuple = ops;
+	request.tuple_end = ops_end;
+	return space_execute_dml(space, NULL, &request, result);
+}
+
+int
+box_ephemeral_upsert(struct space *space, uint32_t index_id, const char *tuple,
+		     const char *tuple_end, const char *ops,
+		     const char *ops_end, int index_base, box_tuple_t **result)
+{
+	mp_tuple_assert(ops, ops_end);
+	mp_tuple_assert(tuple, tuple_end);
+	struct request request;
+	memset(&request, 0, sizeof(request));
+	request.type = IPROTO_UPSERT;
+	request.space_id = space->def->id;
+	request.index_id = index_id;
+	request.ops = ops;
+	request.ops_end = ops_end;
+	request.tuple = tuple;
+	request.tuple_end = tuple_end;
+	request.index_base = index_base;
+	return space_execute_dml(space, NULL, &request, result);
+}
+
 /**
  * Trigger space truncation by bumping a counter
  * in _truncate space.
