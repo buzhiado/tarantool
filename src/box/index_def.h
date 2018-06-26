@@ -358,6 +358,14 @@ index_def_cmp(const struct index_def *key1, const struct index_def *key2);
 bool
 index_def_is_valid(struct index_def *index_def, const char *space_name);
 
+/**
+ * Fill index_opts structure from opts field in tuple of space _index
+ * Throw an error is unrecognized option.
+ */
+int
+index_opts_decode(struct index_opts *opts, const char *map,
+		  struct region *region);
+
 #if defined(__cplusplus)
 } /* extern "C" */
 

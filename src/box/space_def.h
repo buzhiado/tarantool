@@ -177,6 +177,21 @@ space_def_sizeof(uint32_t name_len, const struct field_def *fields,
 		 uint32_t field_count, uint32_t *names_offset,
 		 uint32_t *fields_offset, uint32_t *def_expr_offset);
 
+/**
+ * Decode MessagePack array of fields.
+ * @param data MessagePack array of fields.
+ * @param[out] out_count Length of a result array.
+ * @param space_name Space name to use in error messages.
+ * @param errcode Errcode for client errors.
+ * @param region Region to allocate result array.
+ *
+ * @retval Array of fields.
+ */
+struct field_def *
+space_format_decode(const char *data, uint32_t *out_count,
+		    const char *space_name, uint32_t name_len,
+		    uint32_t errcode, struct region *region);
+
 #if defined(__cplusplus)
 } /* extern "C" */
 

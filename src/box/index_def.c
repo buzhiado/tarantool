@@ -309,3 +309,63 @@ index_def_is_valid(struct index_def *index_def, const char *space_name)
 	}
 	return true;
 }
+
+int
+index_opts_decode(struct index_opts *opts, const char *map,
+		  struct region *region)
+{
+	index_opts_create(opts);
+	if (opts_decode(opts, index_opts_reg, &map, ER_WRONG_INDEX_OPTIONS,
+			BOX_INDEX_FIELD_OPTS, region) != 0) {
+		return -1;
+	}
+	if (opts->distance == rtree_index_distance_type_MAX) {
+		diag_set(ClientError, ER_WRONG_INDEX_OPTIONS,
+			  BOX_INDEX_FIELD_OPTS, "distance must be either "\
+			  "'euclid' or 'manhattan'");
+		return -1;
+	}
+	if (opts->sql != NULL) {
+		char *sql = strdup(opts->sql);
+		if (sql == NULL) {
+			opts->sql = NULL;
+			diag_set(OutOfMemory, strlen(opts->sql) + 1, "strdup",
+				 "sql");
+			return -1;
+		}
+		opts->sql = sql;
+	}
+	if (opts->range_size <= 0) {
+		diag_set(ClientError, ER_WRONG_INDEX_OPTIONS,
+			 BOX_INDEX_FIELD_OPTS,
+			 "range_size must be greater than 0");
+		return -1;
+	}
+	if (opts->page_size <= 0 || opts->page_size > opts->range_size) {
+		diag_set(ClientError, ER_WRONG_INDEX_OPTIONS,
+			 BOX_INDEX_FIELD_OPTS,
+			 "page_size must be greater than 0 and "
+			 "less than or equal to range_size");
+		return -1;
+	}
+	if (opts->run_count_per_level <= 0) {
+		diag_set(ClientError, ER_WRONG_INDEX_OPTIONS,
+			 BOX_INDEX_FIELD_OPTS,
+			 "run_count_per_level must be greater than 0");
+		return -1;
+	}
+	if (opts->run_size_ratio <= 1) {
+		diag_set(ClientError, ER_WRONG_INDEX_OPTIONS,
+			 BOX_INDEX_FIELD_OPTS,
+			 "run_size_ratio must be greater than 1");
+		return -1;
+	}
+	if (opts->bloom_fpr <= 0 || opts->bloom_fpr > 1) {
+		diag_set(ClientError, ER_WRONG_INDEX_OPTIONS,
+			 BOX_INDEX_FIELD_OPTS,
+			 "bloom_fpr must be greater than 0 and "
+			 "less than or equal to 1");
+		return -1;
+	}
+	return 0;
+}
