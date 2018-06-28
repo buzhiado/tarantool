@@ -866,7 +866,6 @@ struct sqlite3_io_methods {
 	int (*xFileSize) (sqlite3_file *, sqlite3_int64 * pSize);
 	int (*xLock) (sqlite3_file *, int);
 	int (*xUnlock) (sqlite3_file *, int);
-	int (*xCheckReservedLock) (sqlite3_file *, int *pResOut);
 	int (*xFileControl) (sqlite3_file *, int op, void *pArg);
 	int (*xSectorSize) (sqlite3_file *);
 	int (*xDeviceCharacteristics) (sqlite3_file *);
@@ -902,11 +901,6 @@ struct sqlite3_io_methods {
 #define SQLITE_FCNTL_TRACE                  17
 #define SQLITE_FCNTL_HAS_MOVED              18
 #define SQLITE_FCNTL_SYNC                   19
-#define SQLITE_FCNTL_COMMIT_PHASETWO        20
-#define SQLITE_FCNTL_ZIPVFS                 22
-#define SQLITE_FCNTL_RBU                    23
-#define SQLITE_FCNTL_VFS_POINTER            24
-#define SQLITE_FCNTL_PDB                    26
 
 int
 sqlite3_os_init(void);
