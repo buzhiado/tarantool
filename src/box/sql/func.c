@@ -643,6 +643,7 @@ static const struct compareInfo likeInfoAlt = { '%', '_', 0, 0 };
 #define SQLITE_MATCH             0
 #define SQLITE_NOMATCH           1
 #define SQLITE_NOWILDCARDMATCH   2
+#define SQL_NO_SYMBOLS_LEFT      65535
 
 /*
  * Compare two UTF-8 strings for equality where the first string is
@@ -698,29 +699,28 @@ patternCompare(const char * pattern,	/* The glob pattern */
 	const char * string_end = string + strlen(string);
 	UErrorCode status = U_ZERO_ERROR;
 
-	while (pattern < pattern_end){
-		c = Utf8Read(pattern, pattern_end);
+	while ((c = Utf8Read(pattern, pattern_end)) != SQL_NO_SYMBOLS_LEFT) {
 		if (c == matchAll) {	/* Match "*" */
 			/* Skip over multiple "*" characters in the pattern.  If there
 			 * are also "?" characters, skip those as well, but consume a
 			 * single character of the input string for each "?" skipped
 			 */
-			while (pattern < pattern_end){
-				c = Utf8Read(pattern, pattern_end);
+			while ((c = Utf8Read(pattern, pattern_end)) !=
+			       SQL_NO_SYMBOLS_LEFT) {
 				if (c != matchAll && c != matchOne)
 					break;
-				if (c == matchOne
-				    && Utf8Read(string, string_end) == 0) {
+				if (c == matchOne &&
+				    Utf8Read(string, string_end) ==
+				    SQL_NO_SYMBOLS_LEFT)
 					return SQLITE_NOWILDCARDMATCH;
-				}
 			}
 			/* "*" at the end of the pattern matches */
-			if (pattern == pattern_end)
+			if (c == SQL_NO_SYMBOLS_LEFT)
 				return SQLITE_MATCH;
 			if (c == matchOther) {
 				if (pInfo->matchSet == 0) {
 					c = Utf8Read(pattern, pattern_end);
-					if (c == 0)
+					if (c == SQL_NO_SYMBOLS_LEFT)
 						return SQLITE_NOWILDCARDMATCH;
 				} else {
 					/* "[...]" immediately follows the "*".  We have to do a slow
@@ -782,7 +782,7 @@ patternCompare(const char * pattern,	/* The glob pattern */
 		if (c == matchOther) {
 			if (pInfo->matchSet == 0) {
 				c = Utf8Read(pattern, pattern_end);
-				if (c == 0)
+				if (c == SQL_NO_SYMBOLS_LEFT)
 					return SQLITE_NOMATCH;
 				zEscaped = pattern;
 			} else {
@@ -802,7 +802,7 @@ patternCompare(const char * pattern,	/* The glob pattern */
 						seen = 1;
 					c2 = Utf8Read(pattern, pattern_end);
 				}
-				while (c2 && c2 != ']') {
+				while (c2 != SQL_NO_SYMBOLS_LEFT && c2 != ']') {
 					if (c2 == '-' && pattern[0] != ']'
 					    && pattern < pattern_end
 					    && prior_c > 0) {
@@ -839,7 +839,8 @@ patternCompare(const char * pattern,	/* The glob pattern */
 			    c == u_tolower(c2))
 				continue;
 		}
-		if (c == matchOne && pattern != zEscaped && c2 != 0)
+		if (c == matchOne && pattern != zEscaped &&
+		    c2 != SQL_NO_SYMBOLS_LEFT)
 			continue;
 		return SQLITE_NOMATCH;
 	}
