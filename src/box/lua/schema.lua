@@ -475,6 +475,68 @@ box.schema.space.create = function(name, options)
     return box.space[id], "created"
 end
 
+local space_new_ephemeral = box.internal.space.space_new_ephemeral
+box.internal.space.space_new_ephemeral = nil
+local space_delete_ephemeral = box.internal.space.space_delete_ephemeral
+box.internal.space.space_delete_ephemeral = nil
+
+box.schema.space.create_ephemeral = function(options)
+    local options_template = {
+        engine = 'string',
+        field_count = 'number',
+        user = 'string, number',
+        format = 'table',
+    }
+    local options_defaults = {
+        engine = 'memtx',
+        field_count = 0,
+    }
+    check_param_table(options, options_template)
+    options = update_param_table(options, options_defaults)
+
+    local format = options.format and options.format or {}
+    check_param(format, 'format', 'table')
+    format = update_format(format)
+    local packed_format = msgpack.encode(format)
+
+    local ephemeral_space = {}
+    ephemeral_space.space = space_new_ephemeral(options.engine,
+                                                options.field_count,
+                                                packed_format)
+    ephemeral_space.space_format = format
+    ephemeral_space.engine = options.engine
+    ephemeral_space.temporary = true
+    -- Set GC for result
+    setmetatable(ephemeral_space, box.schema.space_ephemeral_mt)
+    ephemeral_space.proxy = newproxy(true)
+    getmetatable(ephemeral_space.proxy).__gc = function(self)
+        box.schema.space.drop_ephemeral(ephemeral_space)
+    end
+    -- Return result
+    return ephemeral_space
+end
+
+box.schema.space.drop_ephemeral = function(ephemeral_space)
+    check_param(ephemeral_space.space, 'space', 'cdata')
+    space_delete_ephemeral(ephemeral_space)
+    for k,_ in pairs(ephemeral_space) do
+        ephemeral_space[k] = nil
+    end
+end
+
+box.schema.space_ephemeral_mt.bsize = function(ephemeral_space)
+    return builtin.space_bsize(ephemeral_space.space)
+end
+box.schema.space_ephemeral_mt.format = function(ephemeral_space)
+    return ephemeral_space.space_format
+end
+box.schema.space_ephemeral_mt.run_triggers = function(ephemeral_space, yesno)
+    builtin.space_run_triggers(ephemeral_space.space, yesno)
+end
+
+box.schema.space_ephemeral_mt.drop = box.schema.space.drop_ephemeral
+box.schema.space_ephemeral_mt.__index = box.schema.space_ephemeral_mt
+
 -- space format - the metadata about space fields
 function box.schema.space.format(id, format)
     local _space = box.space._space
