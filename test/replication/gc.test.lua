@@ -107,13 +107,9 @@ fiber.sleep(0.1) -- wait for master to relay data
 -- needed by the replica.
 #box.info.gc().checkpoints == 2 or box.info.gc()
 test_run:cmd("switch replica")
--- Unblock the replica and make it fail to apply a row.
-box.info.replication[1].upstream.message == nil
-box.error.injection.set("ERRINJ_WAL_WRITE", true)
+-- Unblock the replica and break replication.
 box.error.injection.set("ERRINJ_WAL_DELAY", false)
-while box.info.replication[1].upstream.message == nil do fiber.sleep(0.01) end
-box.info.replication[1].upstream.message
-test_run:cmd("switch default")
+box.cfg{replication = {}}
 -- Restart the replica to reestablish replication.
 test_run:cmd("restart server replica")
 -- Wait for the replica to catch up.
