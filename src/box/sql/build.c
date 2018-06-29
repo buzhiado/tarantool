@@ -2582,8 +2582,8 @@ sql_append(struct Parse *parse, const char *str)
  *                 KEY).
  */
 static void
-set_index_def(Parse *parse, Index *index, Table *table, uint32_t iid,
-	      const char *name, uint32_t name_len, bool is_unique,
+set_index_def(struct Parse *parse, struct Index *index, struct Table *table,
+	      uint32_t iid, const char *name, uint32_t name_len, bool is_unique,
 	      struct ExprList *expr_list, u8 idx_type)
 {
 	struct space_def *space_def = table->def;
@@ -2688,8 +2688,9 @@ tnt_error:
 void
 sql_create_index(struct Parse *parse, struct Token *token,
 		 struct SrcList *tbl_name, struct ExprList *col_list,
-		 int on_error, struct Token *start, struct Expr *where,
-		 enum sort_order sort_order, bool if_not_exist, u8 idx_type)
+		 enum on_conflict_action on_error, struct Token *start,
+		 struct Expr *where, enum sort_order sort_order,
+		 bool if_not_exist, u8 idx_type)
 {
 	/* Table to be indexed.  */
 	struct Table *table = NULL;
@@ -2885,11 +2886,11 @@ sql_create_index(struct Parse *parse, struct Token *token,
 		      is_unique, col_list, idx_type);
 
 	/*
-	* Remove all redundant columns from the PRIMARY KEY.
-	* For example, change "PRIMARY KEY(a,b,a,b,c,b,c,d)" into
-	* just "PRIMARY KEY(a,b,c,d)".  Later code assumes the
-	* PRIMARY KEY contains no repeated columns.
-	*/
+	 * Remove all redundant columns from the PRIMARY KEY.
+	 * For example, change "PRIMARY KEY(a,b,a,b,c,b,c,d)" into
+	 * just "PRIMARY KEY(a,b,c,d)". Later code assumes the
+	 * PRIMARY KEY contains no repeated columns.
+	 */
 	if (IsPrimaryKeyIndex(index)) {
 		struct key_part *parts = index->def->key_def->parts;
 		uint32_t part_count = index->def->key_def->part_count;
@@ -2897,7 +2898,7 @@ sql_create_index(struct Parse *parse, struct Token *token,
 
 		for(uint32_t i = 1; i < part_count; i++) {
 			uint32_t j;
-			for(j = 0; j < new_part_count ; j++) {
+			for(j = 0; j < new_part_count; j++) {
 				if(parts[i].fieldno == parts[j].fieldno)
 					break;
 			}
@@ -3717,7 +3718,7 @@ parser_emit_unique_constraint(struct Parse *parser,
 	StrAccum err_accum;
 	sqlite3StrAccumInit(&err_accum, parser->db, 0, 0, 200);
 	struct key_part *part = index->def->key_def->parts;
-	for (uint32_t j = 0; j < index->def->key_def->part_count; ++j, part++) {
+	for (uint32_t j = 0; j < index->def->key_def->part_count; ++j, ++part) {
 		const char *col_name = def->fields[part->fieldno].name;
 		if (j != 0)
 			sqlite3StrAccumAppend(&err_accum, ", ", 2);

@@ -258,81 +258,78 @@ sqlite3FkLocateIndex(Parse * pParse,	/* Parse context to store any error in */
 	struct Index *index = NULL;
 	for (index = pParent->pIndex; index != NULL; index = index->pNext) {
 		int part_count = index->def->key_def->part_count;
-		if (part_count == nCol && index->def->opts.is_unique &&
-		    index->pPartIdxWhere == NULL) {
+		if (part_count != nCol || !index->def->opts.is_unique ||
+		    index->pPartIdxWhere != NULL)
+			continue;
+		/*
+		 * Index is a UNIQUE index (or a PRIMARY KEY) and
+		 * has the right number of columns. If each
+		 * indexed column corresponds to a foreign key
+		 * column of pFKey, then this index is a winner.
+		 */
+		if (zKey == NULL) {
 			/*
-			 * pIdx is a UNIQUE index (or a PRIMARY
-			 * KEY) and has the right number of
-			 * columns. If each indexed column
-			 * corresponds to a foreign key column of
-			 * pFKey, then this index is a winner.
+			 * If zKey is NULL, then this foreign key
+			 * is implicitly mapped to the PRIMARY KEY
+			 * of table pParent. The PRIMARY KEY index
+			 * may be identified by the test.
 			 */
-			if (zKey == NULL) {
+			if (IsPrimaryKeyIndex(index)) {
+				if (aiCol != NULL) {
+					for (int i = 0; i < nCol; i++)
+						aiCol[i] = pFKey->aCol[i].iFrom;
+				}
+				break;
+			}
+		} else {
+			/*
+			 * If zKey is non-NULL, then this foreign
+			 * key was declared to map to an explicit
+			 * list of columns in table pParent. Check
+			 * if this index matches those columns.
+			 * Also, check that the index uses the
+			 * default collation sequences for each
+			 * column.
+			 */
+			int i, j;
+			struct key_part *part = index->def->key_def->parts;
+			for (i = 0; i < nCol; i++, part++) {
 				/*
-				 * If zKey is NULL, then this
-				 * foreign key is implicitly
-				 * mapped to the PRIMARY KEY of
-				 * table pParent. The PRIMARY KEY
-				 * index may be identified by the
-				 * test.
+				 * Index of column in parent
+				 * table.
 				 */
-				if (IsPrimaryKeyIndex(index)) {
-					if (aiCol != NULL) {
-						for (int i = 0; i < nCol; i++)
-							aiCol[i] =
-							    pFKey->aCol[i].
-							    iFrom;
-					}
+				i16 iCol = (int) part->fieldno;
+				/*
+				 * If the index uses a collation
+				 * sequence that is different from
+				 * the default collation sequence
+				 * for the column, this index is
+				 * unusable. Bail out early in
+				 * this case.
+				 */
+				uint32_t id;
+				struct coll *def_coll =
+					sql_column_collation(pParent->def,
+							     iCol, &id);
+				struct coll *coll = part->coll;
+				if (def_coll != coll)
+					break;
+
+				char *zIdxCol = pParent->def->fields[iCol].name;
+				for (j = 0; j < nCol; j++) {
+					if (strcmp(pFKey->aCol[j].zCol,
+						   zIdxCol) != 0)
+						continue;
+					if (aiCol)
+						aiCol[i] = pFKey->aCol[j].iFrom;
 					break;
 				}
-			} else {
-				/* If zKey is non-NULL, then this foreign key was declared to
-				 * map to an explicit list of columns in table pParent. Check if this
-				 * index matches those columns. Also, check that the index uses
-				 * the default collation sequences for each column.
-				 */
-				int i, j;
-				struct key_part *part =
-					index->def->key_def->parts;
-				for (i = 0; i < nCol; i++, part++) {
-					/*
-					 * Index of column in
-					 * parent table.
-					 */
-					i16 iCol = (int) part->fieldno;
-
-					/* If the index uses a collation sequence that is different from
-					 * the default collation sequence for the column, this index is
-					 * unusable. Bail out early in this case.
-					 */
-					struct coll *def_coll;
-					uint32_t id;
-					def_coll = sql_column_collation(pParent->def,
-									iCol,
-									&id);
-					struct coll *coll = part->coll;
-					if (def_coll != coll)
-						break;
-
-					char *zIdxCol =
-						pParent->def->fields[iCol].name;
-					for (j = 0; j < nCol; j++) {
-						if (strcmp
-						    (pFKey->aCol[j].zCol,
-						     zIdxCol) == 0) {
-							if (aiCol)
-								aiCol[i] =
-								    pFKey->
-								    aCol[j].
-								    iFrom;
-							break;
-						}
-					}
-					if (j == nCol)
-						break;
-				}
-				if (i == nCol)
-					break;	/* pIdx is usable */
+				if (j == nCol)
+					break;
+			}
+			if (i == nCol) {
+				/* Index is usable. */
+				break;
 			}
 		}
 	}

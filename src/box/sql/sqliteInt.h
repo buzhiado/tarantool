@@ -3648,8 +3648,9 @@ sql_index_alloc(struct sqlite3 *db, uint32_t part_count);
 void
 sql_create_index(struct Parse *parse, struct Token *token,
 		 struct SrcList *tbl_name, struct ExprList *col_list,
-		 int on_error, struct Token *start, struct Expr *pi_where,
-		 enum sort_order sort_order, bool if_not_exist, u8 idx_type);
+		 enum on_conflict_action on_error, struct Token *start,
+		 struct Expr *pi_where, enum sort_order sort_order,
+		 bool if_not_exist, u8 idx_type);
 
 /**
  * This routine will drop an existing named index.  This routine
