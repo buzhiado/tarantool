@@ -482,6 +482,15 @@ sqlite3_value_double(sqlite3_value *);
 int
 sqlite3_value_int(sqlite3_value *);
 
+/**
+ * Get row column subtype.
+ * @param stmt row data to process.
+ * @param i column index.
+ * @retval sqlute3 subtype if any, 0 else.
+ */
+unsigned int
+sql_column_subtype(struct sqlite3_stmt *stmt, int i);
+
 sqlite3_int64
 sqlite3_value_int64(sqlite3_value *);
 
@@ -671,6 +680,9 @@ enum sql_type {
 	SQLITE_BLOB = 4,
 	SQLITE_NULL = 5,
 };
+
+/** The "subtype" set for MsgPack values.*/
+#define MSGPACK_SUBTYPE  77
 
 /**
  * Structure for internal usage during INSERT/UPDATE

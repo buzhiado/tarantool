@@ -1047,6 +1047,12 @@ sqlite3_column_type(sqlite3_stmt * pStmt, int i)
 	return iType;
 }
 
+unsigned int
+sql_column_subtype(struct sqlite3_stmt *stmt, int i)
+{
+	return sqlite3_value_subtype(columnMem(stmt, i));
+}
+
 /*
  * Convert the N-th element of pStmt->pColName[] into a string using
  * xFunc() then return that string.  If N is out of range, return 0.
